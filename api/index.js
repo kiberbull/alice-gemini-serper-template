@@ -188,6 +188,12 @@ function errorForUser(error) {
   }
 }
 
+function memoryErrorCode(error) {
+  if (error?.name === "AbortError") return "MEMORY_TIMEOUT";
+  if (/^MEMORY_[A-Z0-9_]+$/.test(error?.message || "")) return error.message;
+  return "MEMORY_CONFIG_OR_NETWORK";
+}
+
 function memoryEnabled() {
   return Boolean(process.env.SUPABASE_URL || process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -217,12 +223,17 @@ function conversationId(body) {
 
 async function memoryRequest(id, method, history, timeoutMs) {
   if (timeoutMs < 100) throw new Error("MEMORY_TIMEOUT");
-  const base = new URL(process.env.SUPABASE_URL);
+  let base;
+  try {
+    base = new URL((process.env.SUPABASE_URL || "").trim());
+  } catch {
+    throw new Error("MEMORY_URL_INVALID");
+  }
   if (base.protocol !== "https:" || !base.hostname.endsWith(".supabase.co") || base.username || base.password) {
     throw new Error("MEMORY_CONFIG");
   }
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error("MEMORY_CONFIG");
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  if (!key) throw new Error("MEMORY_KEY_MISSING");
   const url = new URL("/rest/v1/alice_memory", base);
   if (method === "POST") url.searchParams.set("on_conflict", "conversation_id");
   else url.searchParams.set("conversation_id", `eq.${id}`);
@@ -239,8 +250,8 @@ async function memoryRequest(id, method, history, timeoutMs) {
     ...(method === "POST" ? { body: JSON.stringify({
       conversation_id: id, history: safeHistory(history), updated_at: new Date().toISOString()
     }) } : {})
-  }, Math.min(500, timeoutMs));
-  if (!response.ok) {   throw new Error(`MEMORY_HTTP_${response.status}`); }
+  }, Math.min(1000, timeoutMs));
+  if (!response.ok) throw new Error(`MEMORY_HTTP_${response.status}`);
   if (method === "GET") {
     if (!Array.isArray(data)) throw new Error("MEMORY_INVALID_RESPONSE");
     return safeHistory(data[0]?.history);
@@ -252,6 +263,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       service: "alice-deepseek-serper",
+      build: "supabase-diagnostics-v2",
       message: "Webhook is ready. Yandex Dialogs should send POST requests to /api."
     });
   }
@@ -284,8 +296,8 @@ export default async function handler(req, res) {
         return res.status(200).json(aliceResponse("История разговора удалена."));
       }
       oldHistory = await memoryRequest(memoryId, "GET", null, remainingMs());
-    } catch {
-      console.warn("Memory operation failed; no history was used or overwritten.");
+    } catch (error) {
+      console.warn("Memory failed:", memoryErrorCode(error));
       return res.status(200).json(aliceResponse(
         forget ? "Не удалось подтвердить удаление памяти. Повторите команду позже."
           : "Сейчас память недоступна. Попробуйте немного позже."
@@ -314,7 +326,7 @@ export default async function handler(req, res) {
       text,
       oldHistory,
       searchContext,
-      Math.max(0, Math.min(DEEPSEEK_TIMEOUT_MS, remainingMs() - 600))
+      Math.max(0, Math.min(DEEPSEEK_TIMEOUT_MS, remainingMs() - (memoryId ? 1100 : 600)))
     );
 
     const history = [
@@ -326,8 +338,8 @@ export default async function handler(req, res) {
     if (memoryId) {
       try {
         await memoryRequest(memoryId, "POST", history, remainingMs() - 100);
-      } catch {
-        console.warn("Memory save failed; persistence is not confirmed.");
+      } catch (error) {
+        console.warn("Memory save failed:", memoryErrorCode(error));
         return res.status(200).json(aliceResponse(
           "Не удалось подтвердить сохранение разговора в память. " + answer, false, history
         ));
