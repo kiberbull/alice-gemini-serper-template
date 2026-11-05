@@ -3,7 +3,7 @@ const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 1200;
 const MAX_ALICE_TEXT = 1024;
 const TOTAL_RESPONSE_BUDGET_MS = 3600;
-const SERPER_TIMEOUT_MS = 600;
+const SERPER_TIMEOUT_MS = 1500;
 const DEEPSEEK_TIMEOUT_MS = 2500;
 
 const SYSTEM_PROMPT = [
@@ -295,7 +295,7 @@ export default async function handler(req, res) {
         text,
         Math.min(
           SERPER_TIMEOUT_MS,
-          Math.max(0, remainingMs() - 2600)
+          Math.max(0, remainingMs() - 1800)
         )
       );
     }
