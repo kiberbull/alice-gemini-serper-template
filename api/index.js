@@ -240,7 +240,7 @@ async function memoryRequest(id, method, history, timeoutMs) {
       conversation_id: id, history: safeHistory(history), updated_at: new Date().toISOString()
     }) } : {})
   }, Math.min(500, timeoutMs));
-  if (!response.ok) throw new Error("MEMORY_HTTP_ERROR");
+  if (!response.ok) {   throw new Error(`MEMORY_HTTP_${response.status}`); }
   if (method === "GET") {
     if (!Array.isArray(data)) throw new Error("MEMORY_INVALID_RESPONSE");
     return safeHistory(data[0]?.history);
